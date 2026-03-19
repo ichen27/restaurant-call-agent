@@ -498,7 +498,7 @@ export function createApp(options: CreateAppOptions = {}) {
       customerPhone: parsed.data.customer_phone,
       items: hydratedItems,
       totalCents,
-      callId: parsed.data.call_id
+      ...(parsed.data.call_id ? { callId: parsed.data.call_id } : {})
     });
     res.status(201).json({
       id: order.id,
