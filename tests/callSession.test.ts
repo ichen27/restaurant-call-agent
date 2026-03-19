@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { CallSession, CallSessionConfig } from '../src/workers/call-session.js';
+import { CallSession, type CallSessionConfig } from '../src/workers/call-session.js';
 
 describe('CallSession', () => {
   let config: CallSessionConfig;

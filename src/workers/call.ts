@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
-import WebSocket, { WebSocketServer } from 'ws';
+import type WebSocket from 'ws';
+import { WebSocketServer } from 'ws';
 import { safeLog } from '../logger.js';
 import { CallSession } from './call-session.js';
 
