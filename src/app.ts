@@ -2,7 +2,7 @@ import express from 'express';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { OrderService } from './orderService.js';
-import type { OrderStatus, StoreMode } from './types.js';
+import type { OrderItemInput, OrderStatus, StoreMode } from './types.js';
 import { safeLog } from './logger.js';
 import { VoiceTools } from './voice/tools.js';
 import { handleCallerUtterance } from './voice/stateMachine.js';
@@ -432,6 +432,175 @@ export function createApp(options: CreateAppOptions = {}) {
     });
     res.json({ delivered });
   }));
+
+  // --- Internal endpoints for call worker ---
+
+  app.get('/api/internal/stores/:storeId', asyncRoute(async (req, res) => {
+    if (!allowServiceToken(req, res, process.env.INTERNAL_API_KEY, 'x-internal-api-key')) return;
+    const storeId = z.string().parse(req.params.storeId);
+    const store = await db.getStoreById(storeId);
+    if (!store) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'store not found' } });
+    res.json({
+      id: store.id,
+      name: store.name,
+      timezone: store.timezone,
+      public_phone: store.publicPhone,
+      mode: store.mode,
+      default_prep_mins: store.defaultPrepMins
+    });
+  }));
+
+  app.get('/api/internal/stores/:storeId/menu', asyncRoute(async (req, res) => {
+    if (!allowServiceToken(req, res, process.env.INTERNAL_API_KEY, 'x-internal-api-key')) return;
+    const storeId = z.string().parse(req.params.storeId);
+    const items = await db.getMenu(storeId);
+    const query = typeof req.query.q === 'string' ? req.query.q.toLowerCase() : '';
+    const filtered = query
+      ? items.filter((item) => item.name.toLowerCase().includes(query))
+      : items;
+    res.json({
+      items: filtered.map((item) => ({
+        id: item.id,
+        name: item.name,
+        price_cents: item.basePriceCents,
+        is_available: item.isAvailable
+      }))
+    });
+  }));
+
+  app.post('/api/internal/orders', asyncRoute(async (req, res) => {
+    if (!allowServiceToken(req, res, process.env.INTERNAL_API_KEY, 'x-internal-api-key')) return;
+    if (!isOrderIntakeEnabled()) {
+      return res.status(503).json({ error: { code: 'ORDER_INTAKE_DISABLED', message: 'order intake disabled' } });
+    }
+    const parsed = z.object({
+      store_id: z.string().min(1),
+      call_id: z.string().optional(),
+      customer_name: z.string().min(1),
+      customer_phone: z.string().min(4),
+      items: z.array(z.object({
+        item_id: z.string().min(1),
+        qty: z.number().int().positive()
+      })).min(1)
+    }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+    // Hydrate items from menu
+    const menuItems = await db.getMenu(parsed.data.store_id);
+    const menuMap = new Map(menuItems.map((m) => [m.id, m]));
+    const hydratedItems: OrderItemInput[] = [];
+    for (const item of parsed.data.items) {
+      const menuItem = menuMap.get(item.item_id);
+      if (!menuItem) return res.status(400).json({ error: { code: 'ITEM_NOT_FOUND', message: `menu item ${item.item_id} not found` } });
+      if (!menuItem.isAvailable) return res.status(400).json({ error: { code: 'ITEM_UNAVAILABLE', message: `${menuItem.name} is currently unavailable` } });
+      hydratedItems.push({
+        itemId: menuItem.id,
+        itemNameSnapshot: menuItem.name,
+        qty: item.qty,
+        basePriceCents: menuItem.basePriceCents,
+        modifiersSnapshotJson: [],
+        lineTotalCents: menuItem.basePriceCents * item.qty
+      });
+    }
+    const totalCents = hydratedItems.reduce((sum, i) => sum + i.lineTotalCents, 0);
+
+    const order = await orderService.createOrder({
+      storeId: parsed.data.store_id,
+      idempotencyKey: randomUUID(),
+      customerName: parsed.data.customer_name,
+      customerPhone: parsed.data.customer_phone,
+      items: hydratedItems,
+      totalCents,
+      callId: parsed.data.call_id
+    });
+    res.status(201).json({
+      id: order.id,
+      order_number: order.orderNumber,
+      status: order.status,
+      total_cents: order.totalCents,
+      created_at: order.createdAt
+    });
+  }));
+
+  app.post('/api/internal/call-events', asyncRoute(async (req, res) => {
+    if (!allowServiceToken(req, res, process.env.INTERNAL_API_KEY, 'x-internal-api-key')) return;
+    const parsed = z.object({
+      store_id: z.string().min(1),
+      call_id: z.string().min(1),
+      event_type: z.string().min(1),
+      payload: z.record(z.unknown()).default({})
+    }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+    const event = await db.appendStoreEvent(
+      parsed.data.store_id,
+      `call-${parsed.data.call_id}`,
+      parsed.data.event_type,
+      parsed.data.payload
+    );
+    res.status(201).json({ id: event.id });
+  }));
+
+  // --- TwiML endpoints for Twilio webhooks ---
+  // Twilio sends webhooks as application/x-www-form-urlencoded, not JSON.
+  const urlencodedParser = express.urlencoded({ extended: false });
+
+  app.post('/api/telephony/twiml-answer', urlencodedParser, asyncRoute(async (req, res) => {
+    const calledNumber = req.body?.Called ?? req.body?.To ?? '';
+    const callerNumber = req.body?.From ?? '';
+    const callSid = req.body?.CallSid ?? '';
+
+    const store = await db.getStoreByPhone(calledNumber);
+    if (!store) {
+      res.type('text/xml').send(
+        '<?xml version="1.0" encoding="UTF-8"?><Response><Say>Sorry, this number is not configured.</Say><Hangup/></Response>'
+      );
+      return;
+    }
+
+    const callWorkerHost = process.env.CALL_WORKER_HOST ?? 'localhost:3001';
+    const protocol = callWorkerHost.includes('localhost') ? 'ws' : 'wss';
+    res.type('text/xml').send(
+      `<?xml version="1.0" encoding="UTF-8"?>` +
+      `<Response>` +
+        `<Connect>` +
+          `<Stream url="${protocol}://${callWorkerHost}/media-stream">` +
+            `<Parameter name="store_id" value="${store.id}" />` +
+            `<Parameter name="store_name" value="${store.name}" />` +
+            `<Parameter name="caller_phone" value="${callerNumber}" />` +
+          `</Stream>` +
+        `</Connect>` +
+      `</Response>`
+    );
+
+    safeLog('info', 'twiml_answer', {
+      callSid,
+      storeId: store.id,
+      callerPhone: callerNumber
+    });
+  }));
+
+  app.post('/api/telephony/twiml-transfer', urlencodedParser, asyncRoute(async (req, res) => {
+    const storeId = (req.query.store_id as string) ?? '';
+    const store = await db.getStoreById(storeId);
+    const phone = store?.publicPhone ?? '';
+    if (!phone) {
+      res.type('text/xml').send(
+        '<?xml version="1.0" encoding="UTF-8"?><Response><Say>Sorry, we are unable to transfer your call right now.</Say><Hangup/></Response>'
+      );
+      return;
+    }
+    res.type('text/xml').send(
+      `<?xml version="1.0" encoding="UTF-8"?><Response><Dial>${phone}</Dial></Response>`
+    );
+  }));
+
+  app.post('/api/telephony/twiml-error', urlencodedParser, (_req, res) => {
+    res.type('text/xml').send(
+      '<?xml version="1.0" encoding="UTF-8"?><Response>' +
+      '<Say>Sorry, we are experiencing technical difficulties. Please try calling again.</Say>' +
+      '<Hangup/></Response>'
+    );
+  });
 
   app.post('/api/telephony/inbound', telephonyLimiter, asyncRoute(async (req, res) => {
     if (!allowTelephonyAccess(req, res)) return;
