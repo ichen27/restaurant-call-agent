@@ -131,6 +131,26 @@ export class PostgresStore implements AppRepository {
     return row ? (row.mode as StoreMode) : 'CLOSED';
   }
 
+  async getStoreByPhone(phone: string): Promise<Store | undefined> {
+    const result = await this.pool.query<StoreRow>(
+      `SELECT s.id, s.name, s.timezone, s.public_phone, s.mode, s.default_prep_mins
+       FROM stores s
+       JOIN phone_numbers pn ON pn.store_id = s.id
+       WHERE pn.phone_number = $1`,
+      [phone]
+    );
+    const row = result.rows[0];
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      name: row.name,
+      timezone: row.timezone,
+      publicPhone: row.public_phone,
+      mode: row.mode as StoreMode,
+      defaultPrepMins: row.default_prep_mins
+    };
+  }
+
   createOrder(input: CreateOrderInput): Promise<Order> {
     return this.createOrderAsync(input);
   }

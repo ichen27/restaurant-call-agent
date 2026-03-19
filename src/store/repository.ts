@@ -29,6 +29,7 @@ export interface AppRepository {
   setItemAvailability(itemId: string, isAvailable: boolean): Promise<MenuItem | undefined>;
   setStoreMode(storeId: string, mode: StoreMode): Promise<StoreMode | undefined>;
   getStoreMode(storeId: string): Promise<StoreMode>;
+  getStoreByPhone(phone: string): Promise<Store | undefined>;
 
   createOrder(input: CreateOrderInput): Promise<Order>;
   listOrders(storeId: string, statuses?: OrderStatus[]): Promise<Order[]>;

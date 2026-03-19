@@ -72,6 +72,10 @@ export class MemoryStore implements AppRepository {
     return this.stores.get(storeId)?.mode ?? 'CLOSED';
   }
 
+  async getStoreByPhone(_phone: string): Promise<Store | undefined> {
+    return undefined;
+  }
+
   async createOrder(input: CreateOrderInput): Promise<Order> {
     const existingOrderId = this.idempotency.get(`${input.storeId}:${input.idempotencyKey}`);
     if (existingOrderId) {
