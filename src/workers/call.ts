@@ -5,7 +5,7 @@ import { WebSocketServer } from 'ws';
 import { safeLog } from '../logger.js';
 import { CallSession } from './call-session.js';
 
-interface CallWorkerConfig {
+export interface CallWorkerConfig {
   port: number;
   apiBaseUrl: string;
   internalApiKey: string;
@@ -50,7 +50,7 @@ export function createCallWorkerServer(config: CallWorkerConfig) {
   return { server, activeSessions };
 }
 
-function handleNewTwilioConnection(
+export function handleNewTwilioConnection(
   ws: WebSocket,
   config: CallWorkerConfig,
   activeSessions: Map<string, CallSession>

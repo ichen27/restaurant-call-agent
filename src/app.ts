@@ -544,7 +544,7 @@ export function createApp(options: CreateAppOptions = {}) {
       return;
     }
 
-    const callWorkerHost = process.env.CALL_WORKER_HOST ?? 'localhost:3001';
+    const callWorkerHost = process.env.CALL_WORKER_HOST ?? `localhost:${process.env.PORT ?? 3000}`;
     const protocol = callWorkerHost.includes('localhost') ? 'ws' : 'wss';
     res.type('text/xml').send(
       `<?xml version="1.0" encoding="UTF-8"?>` +
