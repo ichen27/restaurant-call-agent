@@ -172,8 +172,9 @@ async function main(): Promise<void> {
   });
 }
 
-// Only run main when not in test environment
-if (process.env.NODE_ENV !== 'test') {
+// Only run main when executed directly (not when imported)
+const isDirectRun = process.argv[1]?.includes('call.ts') || process.argv[1]?.includes('call.js');
+if (isDirectRun) {
   main().catch((err) => {
     console.error(err);
     process.exit(1);
