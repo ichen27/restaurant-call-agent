@@ -2,7 +2,8 @@ import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { OrderService } from './orderService.js';
-import type { OrderItemInput, OrderStatus, StoreMode } from './types.js';
+import { priceMenuOrder, MenuOrderError } from './menuOrder.js';
+import type { OrderStatus, StoreMode } from './types.js';
 import { safeLog } from './logger.js';
 import { createRepository } from './store/factory.js';
 import { asyncRoute } from './http/asyncRoute.js';
@@ -472,28 +473,17 @@ export function createApp(options: CreateAppOptions = {}) {
     }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-    // Hydrate items from menu
-    const menuItems = await db.getMenu(parsed.data.store_id);
-    const menuMap = new Map(menuItems.map((m) => [m.id, m]));
-    const hydratedItems: OrderItemInput[] = [];
-    for (const item of parsed.data.items) {
-      const menuItem = menuMap.get(item.item_id);
-      if (!menuItem) return res.status(400).json({ error: { code: 'ITEM_NOT_FOUND', message: `menu item ${item.item_id} not found` } });
-      if (!menuItem.isAvailable) return res.status(400).json({ error: { code: 'ITEM_UNAVAILABLE', message: `${menuItem.name} is currently unavailable` } });
-      hydratedItems.push({
-        itemId: menuItem.id,
-        itemNameSnapshot: menuItem.name,
-        qty: item.qty,
-        basePriceCents: menuItem.basePriceCents,
-        modifiersSnapshotJson: [],
-        lineTotalCents: menuItem.basePriceCents * item.qty
-      });
+    let priced: ReturnType<typeof priceMenuOrder>;
+    try { priced = priceMenuOrder(await db.getMenu(parsed.data.store_id), parsed.data.items); }
+    catch (error) {
+      if (error instanceof MenuOrderError) return res.status(400).json({ error: { code: error.code, message: error.message } });
+      throw error;
     }
-    const totalCents = hydratedItems.reduce((sum, i) => sum + i.lineTotalCents, 0);
+    const { items: hydratedItems, totalCents } = priced;
 
     const order = await orderService.createOrder({
       storeId: parsed.data.store_id,
-      idempotencyKey: randomUUID(),
+      idempotencyKey: parsed.data.call_id ? `call:${parsed.data.call_id}` : (req.header('idempotency-key') ?? randomUUID()),
       customerName: parsed.data.customer_name,
       customerPhone: parsed.data.customer_phone,
       items: hydratedItems,
