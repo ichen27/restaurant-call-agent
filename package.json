@@ -4,23 +4,29 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "dev": "node --env-file-if-exists=.env --import tsx/esm --watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "migrate": "tsx src/db/migrate.ts",
     "worker:outbox": "tsx src/workers/outbox.ts",
+    "worker:call": "tsx src/workers/call.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:integration": "vitest run tests/postgresStore.integration.test.ts tests/postgresApi.integration.test.ts",
+    "test:integration": "vitest run tests/postgresStore.integration.test.ts tests/postgresApi.integration.test.ts --no-file-parallelism",
     "test:watch": "vitest",
     "staff:web:test": "npm --prefix apps/staff-web run test",
     "staff:web:build": "npm --prefix apps/staff-web run build",
     "staff:web:test:e2e": "npm --prefix apps/staff-web run test:e2e",
     "ci:backend": "npm run lint && npm run typecheck && npm test && npm run build",
-    "ci:staff": "npm run staff:web:test && npm run staff:web:build",
+    "ci:staff": "npm run staff:web:typecheck && npm run staff:web:test && npm run staff:web:build",
     "ci:db": "npm run test:integration",
-    "ci": "npm run ci:backend && npm run ci:staff"
+    "ci": "npm run ci:backend && npm run ci:staff",
+    "staff:web:typecheck": "npm --prefix apps/staff-web run typecheck",
+    "demo": "node dist/demo/server.js",
+    "demo:build": "npm run build && npm run staff:web:build",
+    "demo:dev": "tsx src/demo/server.ts",
+    "demo:test:e2e": "npm --prefix apps/staff-web run test:demo"
   },
   "dependencies": {
     "@types/jsonwebtoken": "^9.0.10",
@@ -29,12 +35,15 @@
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.18.0",
     "pino": "^9.6.0",
+    "twilio": "^5.13.0",
+    "ws": "^8.19.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^22.13.8",
     "@types/supertest": "^6.0.3",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.25.0",
     "@typescript-eslint/parser": "^8.25.0",
     "eslint": "^9.21.0",
@@ -42,5 +51,8 @@
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",
     "vitest": "^3.0.8"
+  },
+  "engines": {
+    "node": ">=22 <23"
   }
 }

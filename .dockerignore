@@ -1,0 +1,13 @@
+node_modules
+dist
+apps/staff-web/node_modules
+apps/staff-web/dist
+.git
+*.md
+tests
+
+.env*
+!.env.example
+.superpowers
+docs
+apps/staff-web/test-results

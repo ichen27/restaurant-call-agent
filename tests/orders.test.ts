@@ -72,16 +72,4 @@ describe('orders API', () => {
       .expect(503);
   });
 
-  it('transfers inbound calls immediately when AGENT_ENABLED is false', async () => {
-    process.env.AGENT_ENABLED = 'false';
-    const { app } = createApp();
-
-    const response = await request(app)
-      .post('/api/telephony/inbound')
-      .send({ call_id: 'agent-disabled-call', store_id: 'store-1', from: '+15559990000', utterance: 'hello' })
-      .expect(200);
-
-    expect(response.body.handoff).toBe(true);
-    expect(String(response.body.state)).toBe('HANDOFF');
-  });
 });

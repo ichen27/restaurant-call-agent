@@ -8,7 +8,7 @@ Purpose: ship production-quality changes that are correct, secure, tested, maint
 - Languages: TypeScript (Node.js)
 - Frameworks/tools: Express, Zod, Pino
 - Testing tools: Vitest, Supertest
-- CI/CD: no `.github/workflows` currently; canonical local CI command is `npm run ci`
+- CI/CD: GitHub Actions in `.github/workflows/ci.yml`; canonical local CI command is `npm run ci`, including staff typecheck
 - Target environments: local now; docs target local/dev/stage/prod rollout
 - Coding standards: TypeScript strict mode, no `any`, consistent type imports, schema validation at HTTP boundaries
 - Constraints: no new dependencies unless approved, preserve API behavior, preserve order idempotency guarantees, preserve telephony state-machine safety

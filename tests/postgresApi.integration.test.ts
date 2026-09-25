@@ -5,6 +5,7 @@ import request from 'supertest';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
+import { hashPassword } from '../src/auth/password.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 const hasDb = Boolean(databaseUrl);
@@ -33,6 +34,8 @@ describeIfDb('Postgres API integration', () => {
     process.env.AUTH_REQUIRED = 'true';
     process.env.JWT_SECRET = 'postgres-api-test-secret';
     await pool.query('TRUNCATE TABLE idempotency_keys, order_items, order_events, outbox_events, orders, call_sessions RESTART IDENTITY');
+    await pool.query("DELETE FROM staff_users WHERE id NOT IN ('staff-1', 'manager-1')");
+    await pool.query("DELETE FROM stores WHERE id != 'store-1'");
   });
 
   afterAll(async () => {
@@ -98,22 +101,16 @@ describeIfDb('Postgres API integration', () => {
   });
 
   it('rejects invalid store scope token access', async () => {
-    process.env.AUTH_USERS_JSON = JSON.stringify([
-      {
-        userId: 'manager-a',
-        storeId: 'store-1',
-        email: 'manager-a@store.test',
-        role: 'MANAGER',
-        password: 'password123'
-      },
-      {
-        userId: 'manager-b',
-        storeId: 'store-2',
-        email: 'manager-b@store.test',
-        role: 'MANAGER',
-        password: 'password123'
-      }
-    ]);
+    await pool.query(
+      "INSERT INTO stores (id, mode, default_prep_mins) VALUES ('store-2', 'OPEN', 20) ON CONFLICT (id) DO NOTHING"
+    );
+    const hash = hashPassword('password123', 'fixedsalt');
+    await pool.query(
+      `INSERT INTO staff_users (id, store_id, email, role, password_hash, is_active)
+       VALUES ($1, $2, $3, $4, $5, TRUE), ($6, $7, $8, $9, $10, TRUE)`,
+      ['manager-a', 'store-1', 'manager-a@store.test', 'MANAGER', hash,
+       'manager-b', 'store-2', 'manager-b@store.test', 'MANAGER', hash]
+    );
 
     const { app } = createApp();
     const login = await request(app)
@@ -124,4 +121,22 @@ describeIfDb('Postgres API integration', () => {
 
     await request(app).get('/api/stores/store-1/events').set('Authorization', `Bearer ${token}`).expect(403);
   });
+  it('replays accepted voice orders after availability changes and concurrent submission', async () => {
+    process.env.INTERNAL_API_KEY = 'pg-internal-test';
+    const { app, db } = createApp();
+    await db.setItemAvailability('item-burrito', true);
+    const body = { store_id: 'store-1', call_id: 'CA-pg-retry', customer_name: 'Casey',
+      customer_phone: '+15555550100', items: [{ item_id: 'item-burrito', qty: 1 }] };
+    const send = () => request(app).post('/api/internal/orders').set('x-internal-api-key', 'pg-internal-test').send(body);
+    const responses = await Promise.all([send(), send()]);
+    expect(responses.map((r) => r.status)).toEqual([201, 201]);
+    expect(responses[0]!.body.id).toBe(responses[1]!.body.id);
+    await db.setItemAvailability('item-burrito', false);
+    try {
+      const retry = await send().expect(201);
+      expect(retry.body.id).toBe(responses[0]!.body.id);
+      expect(await db.listOrders('store-1')).toHaveLength(1);
+    } finally { await db.setItemAvailability('item-burrito', true); }
+  });
+
 });

@@ -1,6 +1,27 @@
 # Changelog
 
-## Unreleased
+## 2026-09-24 — Recruiter product workspace
+
+### Added
+- Isolated synthetic demo with pickup, unavailable-item, and handoff scenarios.
+- Responsive order board, menu controls, receipts, event history, and explicit confirmation.
+- Standalone demo image, Compose deployment, browser CI, and real UI screenshots/walkthrough.
+- Shared menu validation and regression coverage for repeated voice orders.
+
+### Fixed
+- Accepted orders survive menu changes and simultaneous database retries.
+- Delayed conversation steps cannot advance another call; demo history and mutation rates are bounded.
+- Unavailable-item scenarios recover through an explicit workspace reset.
+- Stable per-call order identity prevents duplicate voice submissions.
+- Node 22 runtime alignment resolves the staff test environment mismatch.
+- Strict audio/logger typing and consistent compiled startup paths.
+- Repeatable PostgreSQL integration migrations and sequential database checks.
+
+### Documentation
+- Product-focused README, current architecture/deployment guides, and a dated verification report.
+- Live telephony remains a separately configured, unverified provider path for this release.
+
+## Earlier development history
 
 ### Added
 

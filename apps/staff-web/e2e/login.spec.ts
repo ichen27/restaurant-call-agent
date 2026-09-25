@@ -9,7 +9,7 @@ test('shows login error on failed auth', async ({ page }) => {
     });
   });
 
-  await page.goto('/');
+  await page.goto('/staff');
   await expect(page.getByRole('heading', { name: 'Staff Login' })).toBeVisible();
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByText('login failed')).toBeVisible();

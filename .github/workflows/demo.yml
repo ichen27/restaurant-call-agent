@@ -1,0 +1,45 @@
+name: Product demo
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/staff-web/package-lock.json
+      - run: npm ci
+      - run: npm --prefix apps/staff-web ci
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/staff-web
+      - run: npm run demo:build
+      - run: npm run demo:test:e2e
+      - run: npm run staff:web:test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-traces
+          path: apps/staff-web/test-results
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f Dockerfile.demo -t restaurant-demo .
+      - run: |
+          docker run -d --name demo -p 4173:4173 restaurant-demo
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:4173/health; then exit 0; fi
+            sleep 1
+          done
+          docker logs demo
+          exit 1

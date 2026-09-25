@@ -131,6 +131,33 @@ export class PostgresStore implements AppRepository {
     return row ? (row.mode as StoreMode) : 'CLOSED';
   }
 
+  async getStoreByPhone(phone: string): Promise<Store | undefined> {
+    const result = await this.pool.query<StoreRow>(
+      `SELECT s.id, s.name, s.timezone, s.public_phone, s.mode, s.default_prep_mins
+       FROM stores s
+       JOIN phone_numbers pn ON pn.store_id = s.id
+       WHERE pn.phone_number = $1`,
+      [phone]
+    );
+    const row = result.rows[0];
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      name: row.name,
+      timezone: row.timezone,
+      publicPhone: row.public_phone,
+      mode: row.mode as StoreMode,
+      defaultPrepMins: row.default_prep_mins
+    };
+  }
+
+  async getOrderByIdempotencyKey(storeId: string, key: string): Promise<Order | undefined> {
+    const result = await this.pool.query<{ order_id: string }>(
+      'SELECT order_id FROM idempotency_keys WHERE store_id = $1 AND key = $2', [storeId, key]
+    );
+    return result.rows[0] ? this.getOrderByIdAsync(result.rows[0].order_id) : undefined;
+  }
+
   createOrder(input: CreateOrderInput): Promise<Order> {
     return this.createOrderAsync(input);
   }
@@ -416,6 +443,17 @@ export class PostgresStore implements AppRepository {
       return this.toOrder(orderRow, items, []);
     } catch (error) {
       await client.query('ROLLBACK');
+      // A concurrent request may have committed this key while our insert waited.
+      if (error && typeof error === 'object' && 'code' in error && error.code === '23505') {
+        const winner = await client.query<{ order_id: string }>(
+          'SELECT order_id FROM idempotency_keys WHERE store_id = $1 AND key = $2',
+          [input.storeId, input.idempotencyKey]
+        );
+        if (winner.rows[0]) {
+          const existing = await this.getOrderByIdAsync(winner.rows[0].order_id, client);
+          if (existing) return existing;
+        }
+      }
       throw error;
     } finally {
       client.release();

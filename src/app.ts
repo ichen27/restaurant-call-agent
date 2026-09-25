@@ -1,11 +1,10 @@
 import express from 'express';
-import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { OrderService } from './orderService.js';
+import { priceMenuOrder, MenuOrderError } from './menuOrder.js';
 import type { OrderStatus, StoreMode } from './types.js';
 import { safeLog } from './logger.js';
-import { VoiceTools } from './voice/tools.js';
-import { handleCallerUtterance } from './voice/stateMachine.js';
 import { createRepository } from './store/factory.js';
 import { asyncRoute } from './http/asyncRoute.js';
 import { errorMiddleware } from './http/errorMiddleware.js';
@@ -73,10 +72,6 @@ function envFlagEnabled(name: string, defaultValue = true): boolean {
   return raw.toLowerCase() !== 'false';
 }
 
-function isAgentEnabled(): boolean {
-  return envFlagEnabled('AGENT_ENABLED', true);
-}
-
 function isOrderIntakeEnabled(): boolean {
   return envFlagEnabled('ORDER_INTAKE_ENABLED', true);
 }
@@ -124,7 +119,6 @@ export function createApp(options: CreateAppOptions = {}) {
   const { realtimeGateway } = options;
   const { repository: db, backend } = createRepository();
   const orderService = new OrderService(db);
-  const voiceTools = new VoiceTools(db, orderService);
   const authService = new AuthService(db);
 
   const loginLimiter = createRateLimiter({
@@ -136,11 +130,6 @@ export function createApp(options: CreateAppOptions = {}) {
     keyPrefix: 'order_create',
     windowMs: readLimit('RATE_LIMIT_WINDOW_MS', 5 * 60 * 1000),
     max: readLimit('RATE_LIMIT_ORDER_CREATE_MAX', 60)
-  });
-  const telephonyLimiter = createRateLimiter({
-    keyPrefix: 'telephony',
-    windowMs: readLimit('RATE_LIMIT_WINDOW_MS', 5 * 60 * 1000),
-    max: readLimit('RATE_LIMIT_TELEPHONY_MAX', 30)
   });
 
   app.use(
@@ -166,7 +155,6 @@ export function createApp(options: CreateAppOptions = {}) {
       service: 'call-agent',
       backend,
       realtime_clients: realtimeGateway?.connectedCount() ?? 0,
-      agent_enabled: isAgentEnabled(),
       order_intake_enabled: isOrderIntakeEnabled()
     });
   });
@@ -433,92 +421,171 @@ export function createApp(options: CreateAppOptions = {}) {
     res.json({ delivered });
   }));
 
-  app.post('/api/telephony/inbound', telephonyLimiter, asyncRoute(async (req, res) => {
-    if (!allowTelephonyAccess(req, res)) return;
-    const parsed = z
-      .object({
-        call_id: z.string().min(1),
-        store_id: z.string().min(1).default('store-1'),
-        from: z.string().min(4),
-        utterance: z.string().default('')
-      })
-      .safeParse(req.body);
+  // --- Internal endpoints for call worker ---
 
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-
-    if (!isAgentEnabled()) {
-      await db.appendStoreEvent(parsed.data.store_id, `call-${parsed.data.call_id}`, 'CallHandoffRequested', {
-        callId: parsed.data.call_id,
-        reason: 'agent_disabled',
-        callerPhone: parsed.data.from,
-        draftItems: []
-      });
-      const disabledSession = {
-        callId: parsed.data.call_id,
-        storeId: parsed.data.store_id,
-        state: 'HANDOFF',
-        callerPhone: parsed.data.from,
-        draftItems: [],
-        handoff: true
-      };
-      await db.setCallSession(disabledSession);
-      return res.json({
-        call_id: parsed.data.call_id,
-        state: 'HANDOFF',
-        response: 'Automated ordering is currently disabled. Please hold while I transfer you to staff.',
-        handoff: true,
-        created_order_id: null
-      });
-    }
-
-    const existing = await db.getCallSession(parsed.data.call_id);
-    const session =
-      existing ??
-      ({
-        callId: parsed.data.call_id,
-        storeId: parsed.data.store_id,
-        state: 'GREETING',
-        callerPhone: parsed.data.from,
-        draftItems: [],
-        handoff: false
-      } as const);
-    const mutableSession = existing ?? { ...session };
-    const step = await handleCallerUtterance(mutableSession, parsed.data.utterance, voiceTools);
-    await db.setCallSession(step.session);
-
-    safeLog('info', 'telephony inbound processed', {
-      request_id: req.requestId,
-      call_id: step.session.callId,
-      store_id: step.session.storeId,
-      session_state: step.session.state,
-      handoff: step.session.handoff
-    });
-
+  app.get('/api/internal/stores/:storeId', asyncRoute(async (req, res) => {
+    if (!allowServiceToken(req, res, process.env.INTERNAL_API_KEY, 'x-internal-api-key')) return;
+    const storeId = z.string().parse(req.params.storeId);
+    const store = await db.getStoreById(storeId);
+    if (!store) return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'store not found' } });
     res.json({
-      call_id: step.session.callId,
-      state: step.session.state,
-      response: step.response,
-      handoff: step.session.handoff,
-      created_order_id: step.session.createdOrderId
+      id: store.id,
+      name: store.name,
+      timezone: store.timezone,
+      public_phone: store.publicPhone,
+      mode: store.mode,
+      default_prep_mins: store.defaultPrepMins
     });
   }));
 
-  app.post('/api/telephony/status', telephonyLimiter, asyncRoute(async (req, res) => {
-    if (!allowTelephonyAccess(req, res)) return;
-    const parsed = z
-      .object({
-        call_id: z.string().min(1),
-        status: z.enum(['completed', 'failed', 'canceled'])
-      })
-      .safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-    const session = await db.getCallSession(parsed.data.call_id);
-    if (session) {
-      session.endedAt = new Date().toISOString();
-      await db.setCallSession(session);
-    }
-    res.json({ ok: true });
+  app.get('/api/internal/stores/:storeId/menu', asyncRoute(async (req, res) => {
+    if (!allowServiceToken(req, res, process.env.INTERNAL_API_KEY, 'x-internal-api-key')) return;
+    const storeId = z.string().parse(req.params.storeId);
+    const items = await db.getMenu(storeId);
+    const query = typeof req.query.q === 'string' ? req.query.q.toLowerCase() : '';
+    const filtered = query
+      ? items.filter((item) => item.name.toLowerCase().includes(query))
+      : items;
+    res.json({
+      items: filtered.map((item) => ({
+        id: item.id,
+        name: item.name,
+        price_cents: item.basePriceCents,
+        is_available: item.isAvailable
+      }))
+    });
   }));
+
+  app.post('/api/internal/orders', asyncRoute(async (req, res) => {
+    if (!allowServiceToken(req, res, process.env.INTERNAL_API_KEY, 'x-internal-api-key')) return;
+    if (!isOrderIntakeEnabled()) {
+      return res.status(503).json({ error: { code: 'ORDER_INTAKE_DISABLED', message: 'order intake disabled' } });
+    }
+    const parsed = z.object({
+      store_id: z.string().min(1),
+      call_id: z.string().optional(),
+      customer_name: z.string().min(1),
+      customer_phone: z.string().min(4),
+      items: z.array(z.object({
+        item_id: z.string().min(1),
+        qty: z.number().int().positive()
+      })).min(1)
+    }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+    const idempotencyKey = parsed.data.call_id ? `call:${parsed.data.call_id}` : (req.header('idempotency-key') ?? randomUUID());
+    const existing = await db.getOrderByIdempotencyKey(parsed.data.store_id, idempotencyKey);
+    if (existing) return res.status(201).json({
+      id: existing.id, order_number: existing.orderNumber, status: existing.status,
+      total_cents: existing.totalCents, created_at: existing.createdAt
+    });
+
+    let priced: ReturnType<typeof priceMenuOrder>;
+    try { priced = priceMenuOrder(await db.getMenu(parsed.data.store_id), parsed.data.items); }
+    catch (error) {
+      if (error instanceof MenuOrderError) return res.status(400).json({ error: { code: error.code, message: error.message } });
+      throw error;
+    }
+    const { items: hydratedItems, totalCents } = priced;
+
+    const order = await orderService.createOrder({
+      storeId: parsed.data.store_id,
+      idempotencyKey,
+      customerName: parsed.data.customer_name,
+      customerPhone: parsed.data.customer_phone,
+      items: hydratedItems,
+      totalCents,
+      ...(parsed.data.call_id ? { callId: parsed.data.call_id } : {})
+    });
+    res.status(201).json({
+      id: order.id,
+      order_number: order.orderNumber,
+      status: order.status,
+      total_cents: order.totalCents,
+      created_at: order.createdAt
+    });
+  }));
+
+  app.post('/api/internal/call-events', asyncRoute(async (req, res) => {
+    if (!allowServiceToken(req, res, process.env.INTERNAL_API_KEY, 'x-internal-api-key')) return;
+    const parsed = z.object({
+      store_id: z.string().min(1),
+      call_id: z.string().min(1),
+      event_type: z.string().min(1),
+      payload: z.record(z.unknown()).default({})
+    }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+    const event = await db.appendStoreEvent(
+      parsed.data.store_id,
+      `call-${parsed.data.call_id}`,
+      parsed.data.event_type,
+      parsed.data.payload
+    );
+    res.status(201).json({ id: event.id });
+  }));
+
+  // --- TwiML endpoints for Twilio webhooks ---
+  // Twilio sends webhooks as application/x-www-form-urlencoded, not JSON.
+  const urlencodedParser = express.urlencoded({ extended: false });
+
+  app.post('/api/telephony/twiml-answer', urlencodedParser, asyncRoute(async (req, res) => {
+    const calledNumber = req.body?.Called ?? req.body?.To ?? '';
+    const callerNumber = req.body?.From ?? '';
+    const callSid = req.body?.CallSid ?? '';
+
+    const store = await db.getStoreByPhone(calledNumber);
+    if (!store) {
+      res.type('text/xml').send(
+        '<?xml version="1.0" encoding="UTF-8"?><Response><Say>Sorry, this number is not configured.</Say><Hangup/></Response>'
+      );
+      return;
+    }
+
+    const callWorkerHost = process.env.CALL_WORKER_HOST ?? `localhost:${process.env.PORT ?? 3000}`;
+    const protocol = callWorkerHost.includes('localhost') ? 'ws' : 'wss';
+    res.type('text/xml').send(
+      `<?xml version="1.0" encoding="UTF-8"?>` +
+      `<Response>` +
+        `<Connect>` +
+          `<Stream url="${protocol}://${callWorkerHost}/media-stream">` +
+            `<Parameter name="store_id" value="${store.id}" />` +
+            `<Parameter name="store_name" value="${store.name}" />` +
+            `<Parameter name="caller_phone" value="${callerNumber}" />` +
+          `</Stream>` +
+        `</Connect>` +
+      `</Response>`
+    );
+
+    safeLog('info', 'twiml_answer', {
+      callSid,
+      storeId: store.id,
+      callerPhone: callerNumber
+    });
+  }));
+
+  app.post('/api/telephony/twiml-transfer', urlencodedParser, asyncRoute(async (req, res) => {
+    const storeId = (req.query.store_id as string) ?? '';
+    const store = await db.getStoreById(storeId);
+    const phone = store?.publicPhone ?? '';
+    if (!phone) {
+      res.type('text/xml').send(
+        '<?xml version="1.0" encoding="UTF-8"?><Response><Say>Sorry, we are unable to transfer your call right now.</Say><Hangup/></Response>'
+      );
+      return;
+    }
+    res.type('text/xml').send(
+      `<?xml version="1.0" encoding="UTF-8"?><Response><Dial>${phone}</Dial></Response>`
+    );
+  }));
+
+  app.post('/api/telephony/twiml-error', urlencodedParser, (_req, res) => {
+    res.type('text/xml').send(
+      '<?xml version="1.0" encoding="UTF-8"?><Response>' +
+      '<Say>Sorry, we are experiencing technical difficulties. Please try calling again.</Say>' +
+      '<Hangup/></Response>'
+    );
+  });
+
 
   app.use(errorMiddleware);
 
@@ -557,30 +624,3 @@ function allowServiceToken(
   return true;
 }
 
-function allowTelephonyAccess(req: express.Request, res: express.Response): boolean {
-  if (!allowServiceToken(req, res, process.env.TELEPHONY_WEBHOOK_TOKEN, 'x-telephony-token')) {
-    return false;
-  }
-
-  const signatureSecret = process.env.TELEPHONY_WEBHOOK_SECRET;
-  if (!signatureSecret) {
-    return true;
-  }
-
-  const providedRaw = req.header('x-telephony-signature');
-  if (!providedRaw) {
-    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'missing telephony signature' } });
-    return false;
-  }
-  const provided = providedRaw.startsWith('sha256=') ? providedRaw.slice('sha256='.length) : providedRaw;
-  const body = req.rawBody ?? '';
-  const expected = createHmac('sha256', signatureSecret).update(body).digest('hex');
-  const providedBuffer = Buffer.from(provided, 'hex');
-  const expectedBuffer = Buffer.from(expected, 'hex');
-  if (providedBuffer.length !== expectedBuffer.length || !timingSafeEqual(providedBuffer, expectedBuffer)) {
-    res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'invalid telephony signature' } });
-    return false;
-  }
-
-  return true;
-}

@@ -20,6 +20,31 @@ describe('outbox runner', () => {
     expect(computeBackoffDelayMs(10, 1000, 5000)).toBe(5000);
   });
 
+  it('computeBackoffDelayMs attempt 0 clamps exponent', () => {
+    // attempts=0 → exponent = max(0, -1) = 0 → baseDelayMs * 1
+    expect(computeBackoffDelayMs(0, 1000, 60000)).toBe(1000);
+  });
+
+  it('computeBackoffDelayMs very large attempt caps at max', () => {
+    expect(computeBackoffDelayMs(100, 1000, 60000)).toBe(60000);
+  });
+
+  it('computeBackoffDelayMs zero base returns 0', () => {
+    expect(computeBackoffDelayMs(5, 0, 60000)).toBe(0);
+  });
+
+  it('processOutboxBatch empty batch returns all zeros', async () => {
+    const store = new MemoryStore();
+    const result = await processOutboxBatch(store, new TestPublisher(), {
+      batchLimit: 10,
+      maxAttempts: 3,
+      baseDelayMs: 1000,
+      maxDelayMs: 60000,
+      now: () => new Date('2026-02-22T00:00:00.000Z')
+    });
+    expect(result).toEqual({ selected: 0, sent: 0, failed: 0, deadLettered: 0 });
+  });
+
   it('marks success as sent', async () => {
     const store = new MemoryStore();
     await store.createOrder({

@@ -363,3 +363,14 @@
   - Browser-level E2E coverage starts as scaffolding and should be expanded alongside workflow features.
 - Rollback:
   - Remove frontend test scripts/deps and revert root CI wiring if maintenance overhead outweighs current MVP risk reduction.
+
+## 2026-09-24 — Use Node 22 consistently
+
+Development, CI, and container images use Node 22. The existing jsdom tests collide with Node 25 global Web Storage; both pass unchanged under Node 22. Lockfiles are used for both packages and frontend type checking is explicit. No application storage workaround or dependency upgrade is needed.
+
+
+## 2026-09-24 — Isolated product demonstration
+The demo uses a separate server and per-visitor MemoryStore instances, sharing menu validation, OrderService, status transitions, and event generation with the voice backend. It uses SSE plus polling; the authenticated staff API retains WebSockets. Sessions are bounded and expire. Scripted dialogue is explicitly labeled and cannot place real calls. This supports a reproducible recruiter experience without credentials or production data.
+
+## 2026-09-24 — One submitted order per voice call
+The internal voice endpoint derives idempotency from call_id when supplied, replacing a random key per request. Repeated delivery of the same call cannot create multiple orders. A second independent order requires a distinct call identity. Menu data remains the authority for availability and prices.

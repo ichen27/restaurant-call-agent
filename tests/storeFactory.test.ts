@@ -25,4 +25,10 @@ describe('store factory', () => {
     expect(built.backend).toBe('postgres');
     expect(built.repository).toBeInstanceOf(PostgresStore);
   });
+
+  it('createRepository throws for postgres without DATABASE_URL', () => {
+    process.env.STORE_BACKEND = 'postgres';
+    delete process.env.DATABASE_URL;
+    expect(() => createRepository()).toThrow(/DATABASE_URL/);
+  });
 });
