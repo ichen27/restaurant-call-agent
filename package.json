@@ -13,7 +13,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:integration": "vitest run tests/postgresStore.integration.test.ts tests/postgresApi.integration.test.ts",
+    "test:integration": "vitest run tests/postgresStore.integration.test.ts tests/postgresApi.integration.test.ts --no-file-parallelism",
     "test:watch": "vitest",
     "staff:web:test": "npm --prefix apps/staff-web run test",
     "staff:web:build": "npm --prefix apps/staff-web run build",
@@ -22,7 +22,11 @@
     "ci:staff": "npm run staff:web:typecheck && npm run staff:web:test && npm run staff:web:build",
     "ci:db": "npm run test:integration",
     "ci": "npm run ci:backend && npm run ci:staff",
-    "staff:web:typecheck": "npm --prefix apps/staff-web run typecheck"
+    "staff:web:typecheck": "npm --prefix apps/staff-web run typecheck",
+    "demo": "node dist/demo/server.js",
+    "demo:build": "npm run build && npm run staff:web:build",
+    "demo:dev": "tsx src/demo/server.ts",
+    "demo:test:e2e": "npm --prefix apps/staff-web run test:demo"
   },
   "dependencies": {
     "@types/jsonwebtoken": "^9.0.10",

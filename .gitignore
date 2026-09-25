@@ -5,3 +5,6 @@ dist/
 coverage/
 .vitest/
 *.log
+
+apps/staff-web/test-results/
+apps/staff-web/playwright-report/
