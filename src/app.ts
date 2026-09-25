@@ -473,6 +473,13 @@ export function createApp(options: CreateAppOptions = {}) {
     }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
+    const idempotencyKey = parsed.data.call_id ? `call:${parsed.data.call_id}` : (req.header('idempotency-key') ?? randomUUID());
+    const existing = await db.getOrderByIdempotencyKey(parsed.data.store_id, idempotencyKey);
+    if (existing) return res.status(201).json({
+      id: existing.id, order_number: existing.orderNumber, status: existing.status,
+      total_cents: existing.totalCents, created_at: existing.createdAt
+    });
+
     let priced: ReturnType<typeof priceMenuOrder>;
     try { priced = priceMenuOrder(await db.getMenu(parsed.data.store_id), parsed.data.items); }
     catch (error) {
@@ -483,7 +490,7 @@ export function createApp(options: CreateAppOptions = {}) {
 
     const order = await orderService.createOrder({
       storeId: parsed.data.store_id,
-      idempotencyKey: parsed.data.call_id ? `call:${parsed.data.call_id}` : (req.header('idempotency-key') ?? randomUUID()),
+      idempotencyKey,
       customerName: parsed.data.customer_name,
       customerPhone: parsed.data.customer_phone,
       items: hydratedItems,

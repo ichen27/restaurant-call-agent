@@ -121,4 +121,22 @@ describeIfDb('Postgres API integration', () => {
 
     await request(app).get('/api/stores/store-1/events').set('Authorization', `Bearer ${token}`).expect(403);
   });
+  it('replays accepted voice orders after availability changes and concurrent submission', async () => {
+    process.env.INTERNAL_API_KEY = 'pg-internal-test';
+    const { app, db } = createApp();
+    await db.setItemAvailability('item-burrito', true);
+    const body = { store_id: 'store-1', call_id: 'CA-pg-retry', customer_name: 'Casey',
+      customer_phone: '+15555550100', items: [{ item_id: 'item-burrito', qty: 1 }] };
+    const send = () => request(app).post('/api/internal/orders').set('x-internal-api-key', 'pg-internal-test').send(body);
+    const responses = await Promise.all([send(), send()]);
+    expect(responses.map((r) => r.status)).toEqual([201, 201]);
+    expect(responses[0]!.body.id).toBe(responses[1]!.body.id);
+    await db.setItemAvailability('item-burrito', false);
+    try {
+      const retry = await send().expect(201);
+      expect(retry.body.id).toBe(responses[0]!.body.id);
+      expect(await db.listOrders('store-1')).toHaveLength(1);
+    } finally { await db.setItemAvailability('item-burrito', true); }
+  });
+
 });

@@ -76,6 +76,11 @@ export class MemoryStore implements AppRepository {
     return undefined;
   }
 
+  async getOrderByIdempotencyKey(storeId: string, key: string): Promise<Order | undefined> {
+    const id = this.idempotency.get(`${storeId}:${key}`);
+    return id ? this.orders.get(id) : undefined;
+  }
+
   async createOrder(input: CreateOrderInput): Promise<Order> {
     const existingOrderId = this.idempotency.get(`${input.storeId}:${input.idempotencyKey}`);
     if (existingOrderId) {

@@ -31,6 +31,7 @@ export interface AppRepository {
   getStoreMode(storeId: string): Promise<StoreMode>;
   getStoreByPhone(phone: string): Promise<Store | undefined>;
 
+  getOrderByIdempotencyKey(storeId: string, key: string): Promise<Order | undefined>;
   createOrder(input: CreateOrderInput): Promise<Order>;
   listOrders(storeId: string, statuses?: OrderStatus[]): Promise<Order[]>;
   getOrderById(orderId: string): Promise<Order | undefined>;

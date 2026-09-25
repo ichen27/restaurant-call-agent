@@ -151,6 +151,13 @@ export class PostgresStore implements AppRepository {
     };
   }
 
+  async getOrderByIdempotencyKey(storeId: string, key: string): Promise<Order | undefined> {
+    const result = await this.pool.query<{ order_id: string }>(
+      'SELECT order_id FROM idempotency_keys WHERE store_id = $1 AND key = $2', [storeId, key]
+    );
+    return result.rows[0] ? this.getOrderByIdAsync(result.rows[0].order_id) : undefined;
+  }
+
   createOrder(input: CreateOrderInput): Promise<Order> {
     return this.createOrderAsync(input);
   }
@@ -436,6 +443,17 @@ export class PostgresStore implements AppRepository {
       return this.toOrder(orderRow, items, []);
     } catch (error) {
       await client.query('ROLLBACK');
+      // A concurrent request may have committed this key while our insert waited.
+      if (error && typeof error === 'object' && 'code' in error && error.code === '23505') {
+        const winner = await client.query<{ order_id: string }>(
+          'SELECT order_id FROM idempotency_keys WHERE store_id = $1 AND key = $2',
+          [input.storeId, input.idempotencyKey]
+        );
+        if (winner.rows[0]) {
+          const existing = await this.getOrderByIdAsync(winner.rows[0].order_id, client);
+          if (existing) return existing;
+        }
+      }
       throw error;
     } finally {
       client.release();

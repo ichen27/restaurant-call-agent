@@ -52,3 +52,31 @@ it('rejects unavailable items without creating an order', async () => {
   expect(res.body.error.code).toBe('ITEM_UNAVAILABLE');
   expect(await db.listOrders('store-1')).toHaveLength(0);
 });
+
+it('returns an accepted voice order even if availability changes before a retry', async () => {
+  const { app, db } = createApp();
+  const body = {
+    store_id: 'store-1',
+    call_id: 'CA-stock-retry',
+    customer_name: 'Casey',
+    customer_phone: '+15555550100',
+    items: [{ item_id: 'item-burrito', qty: 1 }]
+  };
+  const first = await request(app)
+    .post('/api/internal/orders')
+    .set('x-internal-api-key', 'test-internal')
+    .send(body)
+    .expect(201);
+  await db.setItemAvailability('item-burrito', false);
+  const retry = await request(app)
+    .post('/api/internal/orders')
+    .set('x-internal-api-key', 'test-internal')
+    .send(body)
+    .expect(201);
+  expect(retry.body.id).toBe(first.body.id);
+  await request(app)
+    .post('/api/internal/orders')
+    .set('x-internal-api-key', 'test-internal')
+    .send({ ...body, call_id: 'CA-new-call' })
+    .expect(400);
+});
