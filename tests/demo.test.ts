@@ -25,7 +25,7 @@ it('isolates visitors, requires confirmation, and prevents duplicate orders', as
       await api()
         .post('/api/demo/next')
         .set('x-demo-session', a.token)
-        .send({ step: state.call.cursor })
+        .send({ step: state.call.cursor, callId: state.call.id })
         .expect(200)
     ).body;
   }
@@ -65,7 +65,10 @@ it('hands off without submitting and resets only the current visitor', async () 
   ).body;
   while (state.call.phase === 'talking') {
     state = (
-      await request(app).post('/api/demo/next').set('x-demo-session', token).send({ step: state.call.cursor })
+      await request(app)
+        .post('/api/demo/next')
+        .set('x-demo-session', token)
+        .send({ step: state.call.cursor, callId: state.call.id })
     ).body;
   }
   expect(state.call.phase).toBe('handoff');
@@ -99,7 +102,10 @@ it('rejects unknown sessions, invalid input, unavailable orders and expired sess
   ).body;
   while (state.call.phase === 'talking')
     state = (
-      await request(app).post('/api/demo/next').set('x-demo-session', token).send({ step: state.call.cursor })
+      await request(app)
+        .post('/api/demo/next')
+        .set('x-demo-session', token)
+        .send({ step: state.call.cursor, callId: state.call.id })
     ).body;
   expect(state.call.phase).toBe('handoff');
   expect(state.orders).toHaveLength(4);
@@ -113,31 +119,151 @@ it('bounds session capacity without evicting active visitors', async () => {
   await request(app).post('/api/demo/sessions').expect(503);
 });
 
-
 it('handles concurrent confirmations once and rejects sold-out or closed orders', async () => {
   const { app } = createDemoApp();
   const { token } = (await request(app).post('/api/demo/sessions')).body;
-  let state = (await request(app).post('/api/demo/scenario').set('x-demo-session', token).send({ scenario: 'pickup' })).body;
-  while (state.call.phase === 'talking') state = (await request(app).post('/api/demo/next').set('x-demo-session', token).send({ step: state.call.cursor })).body;
-  await request(app).patch('/api/demo/menu/sesame-chicken').set('x-demo-session', token).send({ isAvailable: false }).expect(200);
-  await request(app).post('/api/demo/confirm').set('x-demo-session', token).send({ callId: state.call.id }).expect(409);
-  await request(app).patch('/api/demo/menu/sesame-chicken').set('x-demo-session', token).send({ isAvailable: true }).expect(200);
-  await request(app).patch('/api/demo/store').set('x-demo-session', token).send({ mode: 'CLOSED' }).expect(200);
-  await request(app).post('/api/demo/confirm').set('x-demo-session', token).send({ callId: state.call.id }).expect(409);
+  let state = (
+    await request(app).post('/api/demo/scenario').set('x-demo-session', token).send({ scenario: 'pickup' })
+  ).body;
+  while (state.call.phase === 'talking')
+    state = (
+      await request(app)
+        .post('/api/demo/next')
+        .set('x-demo-session', token)
+        .send({ step: state.call.cursor, callId: state.call.id })
+    ).body;
+  await request(app)
+    .patch('/api/demo/menu/sesame-chicken')
+    .set('x-demo-session', token)
+    .send({ isAvailable: false })
+    .expect(200);
+  await request(app)
+    .post('/api/demo/confirm')
+    .set('x-demo-session', token)
+    .send({ callId: state.call.id })
+    .expect(409);
+  await request(app)
+    .patch('/api/demo/menu/sesame-chicken')
+    .set('x-demo-session', token)
+    .send({ isAvailable: true })
+    .expect(200);
+  await request(app)
+    .patch('/api/demo/store')
+    .set('x-demo-session', token)
+    .send({ mode: 'CLOSED' })
+    .expect(200);
+  await request(app)
+    .post('/api/demo/confirm')
+    .set('x-demo-session', token)
+    .send({ callId: state.call.id })
+    .expect(409);
   await request(app).patch('/api/demo/store').set('x-demo-session', token).send({ mode: 'OPEN' }).expect(200);
-  await Promise.all([1, 2].map(() => request(app).post('/api/demo/confirm').set('x-demo-session', token).send({ callId: state.call.id }).expect(200)));
+  await Promise.all(
+    [1, 2].map(() =>
+      request(app)
+        .post('/api/demo/confirm')
+        .set('x-demo-session', token)
+        .send({ callId: state.call.id })
+        .expect(200)
+    )
+  );
   const final = (await request(app).get('/api/demo/state').set('x-demo-session', token)).body;
   expect(final.orders).toHaveLength(5);
-  expect(final.call.messages.filter((m: { text: string }) => m.text.startsWith('You’re all set'))).toHaveLength(1);
+  expect(
+    final.call.messages.filter((m: { text: string }) => m.text.startsWith('You’re all set'))
+  ).toHaveLength(1);
 });
 
 it('treats a repeated conversation step as a retry and validates menu changes', async () => {
   const { app } = createDemoApp();
   const { token } = (await request(app).post('/api/demo/sessions')).body;
-  await request(app).post('/api/demo/scenario').set('x-demo-session', token).send({ scenario: 'pickup' }).expect(200);
-  const first = await request(app).post('/api/demo/next').set('x-demo-session', token).send({ step: 1 }).expect(200);
-  const retry = await request(app).post('/api/demo/next').set('x-demo-session', token).send({ step: 1 }).expect(200);
+  const start = (
+    await request(app)
+      .post('/api/demo/scenario')
+      .set('x-demo-session', token)
+      .send({ scenario: 'pickup' })
+      .expect(200)
+  ).body;
+  const first = await request(app)
+    .post('/api/demo/next')
+    .set('x-demo-session', token)
+    .send({ step: 1, callId: start.call.id })
+    .expect(200);
+  const retry = await request(app)
+    .post('/api/demo/next')
+    .set('x-demo-session', token)
+    .send({ step: 1, callId: start.call.id })
+    .expect(200);
   expect(retry.body.call.messages).toEqual(first.body.call.messages);
-  await request(app).patch('/api/demo/menu/no-item').set('x-demo-session', token).send({ isAvailable: false }).expect(404);
-  await request(app).patch('/api/demo/menu/sesame-chicken').set('x-demo-session', token).send({ isAvailable: 'yes' }).expect(400);
+  await request(app)
+    .patch('/api/demo/menu/no-item')
+    .set('x-demo-session', token)
+    .send({ isAvailable: false })
+    .expect(404);
+  await request(app)
+    .patch('/api/demo/menu/sesame-chicken')
+    .set('x-demo-session', token)
+    .send({ isAvailable: 'yes' })
+    .expect(400);
+});
+
+it('rejects delayed steps from an older call after a reset', async () => {
+  const { app } = createDemoApp();
+  const { token } = (await request(app).post('/api/demo/sessions')).body;
+  const start = (
+    await request(app).post('/api/demo/scenario').set('x-demo-session', token).send({ scenario: 'pickup' })
+  ).body;
+  await request(app).post('/api/demo/reset').set('x-demo-session', token).send({}).expect(200);
+  const replacement = (
+    await request(app).post('/api/demo/scenario').set('x-demo-session', token).send({ scenario: 'pickup' })
+  ).body;
+  await request(app)
+    .post('/api/demo/next')
+    .set('x-demo-session', token)
+    .send({ callId: start.call.id, step: 1 })
+    .expect(409);
+  const state = (await request(app).get('/api/demo/state').set('x-demo-session', token)).body;
+  expect(state.call.id).toBe(replacement.call.id);
+  expect(state.call.cursor).toBe(1);
+});
+
+it('bounds scenario history in a long-lived session', async () => {
+  const { app } = createDemoApp();
+  const { token } = (await request(app).post('/api/demo/sessions')).body;
+  for (let i = 0; i < 30; i++) {
+    let state = (
+      await request(app)
+        .post('/api/demo/scenario')
+        .set('x-demo-session', token)
+        .send({ scenario: 'handoff' })
+        .expect(200)
+    ).body;
+    while (state.call.phase === 'talking')
+      state = (
+        await request(app)
+          .post('/api/demo/next')
+          .set('x-demo-session', token)
+          .send({ callId: state.call.id, step: state.call.cursor })
+          .expect(200)
+      ).body;
+  }
+  await request(app)
+    .post('/api/demo/scenario')
+    .set('x-demo-session', token)
+    .send({ scenario: 'handoff' })
+    .expect(409);
+});
+
+it('keeps mutation rate limits across a reset', async () => {
+  const { app } = createDemoApp({ maxMutationsPerMinute: 2 });
+  const { token } = (await request(app).post('/api/demo/sessions')).body;
+  for (let i = 0; i < 2; i++)
+    await request(app).post('/api/demo/reset').set('x-demo-session', token).send({}).expect(200);
+  const limited = await request(app)
+    .post('/api/demo/reset')
+    .set('x-demo-session', token)
+    .send({})
+    .expect(429);
+  expect(limited.headers['retry-after']).toBeDefined();
+  await request(app).get('/api/demo/state').set('x-demo-session', token).expect(200);
 });

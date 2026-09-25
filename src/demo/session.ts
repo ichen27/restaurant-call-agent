@@ -33,6 +33,7 @@ export class DemoSession {
   readonly service = new OrderService(this.db);
   call: Call | null = null;
   private script: Message[] = [];
+  private scenarioRuns = 0;
   readonly createdAt: number;
   constructor(now: number) {
     this.createdAt = now;
@@ -85,6 +86,8 @@ export class DemoSession {
   async start(scenario: Scenario) {
     if (this.call?.phase === 'talking' || this.call?.phase === 'confirmation')
       throw new Error('Finish or reset the current call first.');
+    if (this.scenarioRuns >= 30) throw new Error('Sample history is full. Reset the demo to continue.');
+    this.scenarioRuns++;
     if (scenario === 'unavailable') await this.db.setItemAvailability('sesame-chicken', false);
     const greeting: Message = {
       role: 'agent',
@@ -131,9 +134,9 @@ export class DemoSession {
     return this.snapshot();
   }
 
-  async next(step: number) {
+  async next(callId: string, step: number) {
     const call = this.call;
-    if (!call) throw new Error('Start a sample call first.');
+    if (!call || call.id !== callId) throw new Error('The conversation changed. Refresh and try again.');
     if (step < call.cursor || call.phase !== 'talking') return this.snapshot();
     if (step !== call.cursor) throw new Error('The conversation changed. Refresh and try again.');
     const message = this.script[call.cursor];

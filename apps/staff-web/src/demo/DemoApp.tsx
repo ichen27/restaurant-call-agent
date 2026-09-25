@@ -164,7 +164,7 @@ export function DemoApp() {
   useEffect(() => {
     if (!playing || busy || state?.call?.phase !== 'talking') return;
     const timer = window.setTimeout(() => {
-      void act('next', { step: state.call!.cursor });
+      void act('next', { step: state.call!.cursor, callId: state.call!.id });
     }, 1600);
     return () => window.clearTimeout(timer);
   }, [playing, busy, state?.call?.cursor, state?.call?.phase]);
@@ -517,7 +517,7 @@ export function DemoApp() {
                               <button
                                 className="primary-button"
                                 disabled={busy || expired}
-                                onClick={() => void act('next', { step: call.cursor })}
+                                onClick={() => void act('next', { step: call.cursor, callId: call.id })}
                               >
                                 Next turn <Icon name="arrow" size={16} />
                               </button>
@@ -562,10 +562,15 @@ export function DemoApp() {
                                 disabled={busy || expired}
                                 onClick={() => {
                                   setPlaying(false);
-                                  void act('scenario', { scenario: 'pickup' });
+                                  void (call.phase === 'handoff'
+                                    ? act('reset')
+                                    : act('scenario', { scenario: 'pickup' }));
                                 }}
                               >
-                                Try another pickup call <Icon name="arrow" size={15} />
+                                {call.phase === 'handoff'
+                                  ? 'Reset sample workspace'
+                                  : 'Try another pickup call'}{' '}
+                                <Icon name="arrow" size={15} />
                               </button>
                             </>
                           )}

@@ -8,18 +8,21 @@ interface Options {
   now?: () => number;
   ttlMs?: number;
   maxSessions?: number;
+  maxMutationsPerMinute?: number;
 }
 export function createDemoApp(options: Options = {}) {
   const app = express();
   const now = options.now ?? Date.now;
   const ttl = options.ttlMs ?? 30 * 60 * 1000;
   const sessions = new Map<string, DemoSession>();
+  const mutations = new Map<string, { time: number; count: number }>();
   const listeners = new Map<string, Set<express.Response>>();
   const births = new Map<string, { time: number; count: number }>();
   const sweep = () => {
     for (const [key, session] of sessions)
       if (now() - session.createdAt >= ttl) {
         sessions.delete(key);
+        mutations.delete(key);
         for (const response of listeners.get(key) ?? []) response.end();
         listeners.delete(key);
       }
@@ -68,6 +71,16 @@ export function createDemoApp(options: Options = {}) {
     const session = sessions.get(token);
     if (!session)
       return res.status(401).json({ error: 'Your demo session expired. Start a fresh demo to continue.' });
+    if (req.method === 'POST' || req.method === 'PATCH') {
+      const previous = mutations.get(token);
+      const bucket = previous && now() - previous.time < 60000 ? previous : { time: now(), count: 0 };
+      if (bucket.count >= (options.maxMutationsPerMinute ?? 120)) {
+        res.setHeader('Retry-After', String(Math.max(1, Math.ceil((60000 - (now() - bucket.time)) / 1000))));
+        return res.status(429).json({ error: 'Too many changes. Please wait a moment and try again.' });
+      }
+      bucket.count++;
+      mutations.set(token, bucket);
+    }
     res.locals.demo = session;
     res.locals.token = token;
     next();
@@ -124,8 +137,10 @@ export function createDemoApp(options: Options = {}) {
     z.object({ scenario: z.enum(['pickup', 'unavailable', 'handoff']) }),
     (session, input) => session.start((input as { scenario: 'pickup' | 'unavailable' | 'handoff' }).scenario)
   );
-  command('/api/demo/next', z.object({ step: z.number().int().min(0) }), (session, input) =>
-    session.next((input as { step: number }).step)
+  command(
+    '/api/demo/next',
+    z.object({ callId: z.string().uuid(), step: z.number().int().min(0) }),
+    (session, input) => session.next((input as { callId: string }).callId, (input as { step: number }).step)
   );
   command('/api/demo/confirm', z.object({ callId: z.string().uuid() }), (session, input) =>
     session.confirm((input as { callId: string }).callId)
