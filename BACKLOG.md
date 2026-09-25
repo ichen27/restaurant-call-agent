@@ -931,3 +931,18 @@ Verification Results (fill after work):
 
 Rollback Strategy:
 - Revert doc update if prioritization changes.
+
+
+## Recruiter presentation release — approved 2026-09-24
+### DX-2012 — Reproducible baseline
+Status: READY
+Approval: APPROVED
+Scope: docs/superpowers/plans/2026-09-24-recruiter-baseline.md
+### FEAT-2013 — Isolated guided product demo
+Status: READY
+Approval: APPROVED
+Scope: approved recruiter demo design; synthetic sessions, shared order logic, polished UI, browser tests.
+### DOC-2014 — GitHub product presentation
+Status: READY
+Approval: APPROVED
+Scope: accurate README, screenshots, deployment instructions, verification report, focused commits.

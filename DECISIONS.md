@@ -363,3 +363,7 @@
   - Browser-level E2E coverage starts as scaffolding and should be expanded alongside workflow features.
 - Rollback:
   - Remove frontend test scripts/deps and revert root CI wiring if maintenance overhead outweighs current MVP risk reduction.
+
+## 2026-09-24 — Use Node 22 consistently
+
+Development, CI, and container images use Node 22. The existing jsdom tests collide with Node 25 global Web Storage; both pass unchanged under Node 22. Lockfiles are used for both packages and frontend type checking is explicit. No application storage workaround or dependency upgrade is needed.
