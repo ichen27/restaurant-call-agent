@@ -9,6 +9,9 @@
 - Shared menu validation and regression coverage for repeated voice orders.
 
 ### Fixed
+- Accepted orders survive menu changes and simultaneous database retries.
+- Delayed conversation steps cannot advance another call; demo history and mutation rates are bounded.
+- Unavailable-item scenarios recover through an explicit workspace reset.
 - Stable per-call order identity prevents duplicate voice submissions.
 - Node 22 runtime alignment resolves the staff test environment mismatch.
 - Strict audio/logger typing and consistent compiled startup paths.

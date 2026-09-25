@@ -935,14 +935,14 @@ Rollback Strategy:
 
 ## Recruiter presentation release — approved 2026-09-24
 ### DX-2012 — Reproducible baseline
-Status: READY
+Status: DONE
 Approval: APPROVED
 Scope: docs/superpowers/plans/2026-09-24-recruiter-baseline.md
 ### FEAT-2013 — Isolated guided product demo
-Status: READY
+Status: DONE
 Approval: APPROVED
 Scope: approved recruiter demo design; synthetic sessions, shared order logic, polished UI, browser tests.
 ### DOC-2014 — GitHub product presentation
-Status: READY
+Status: DONE
 Approval: APPROVED
 Scope: accurate README, screenshots, deployment instructions, verification report, focused commits.

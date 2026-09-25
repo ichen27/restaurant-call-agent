@@ -14,17 +14,18 @@ These results describe the recruiter product demo and the repository checks run 
 | Check | Observed result |
 | --- | --- |
 | Root lint and TypeScript checks | Passed |
-| Backend unit/API tests | Passed; database tests run separately |
+| Backend unit/API tests | 200 passed; 8 database tests run separately |
 | Staff TypeScript / component tests / build | Passed; 2 component tests |
 | Demo browser workflows | 3 passed: full pickup lifecycle, unavailable-item handoff/reset, mobile menu controls/no horizontal overflow |
-| PostgreSQL integration | 7 passed against isolated test storage |
+| Original staff login browser workflow | 1 passed |
+| PostgreSQL integration | 8 passed against isolated test storage |
 | Demo image | Built successfully |
 | Running demo container | UI returns 200; health is OK; a session creates four sample orders |
 | Desktop/mobile visual check | Actual screenshots inspected; no clipped controls or horizontal overflow observed |
 | Provider-backed telephone call | Not run |
 | Real transfer / speech accuracy / voice latency | Not measured |
 
-The backend tests include duplicate voice submission, server-owned prices, unavailable items, explicit demo confirmation, concurrent confirmation, illegal transitions, session isolation/expiry/capacity, repeated conversation steps, and invalid menu inputs.
+The backend tests include duplicate voice submission, server-owned prices, unavailable items, explicit demo confirmation, concurrent confirmation, illegal transitions, session isolation/expiry/capacity, stale-call rejection, bounded scenario history, reset-resistant mutation limits, repeated conversation steps, and invalid menu inputs.
 
 ## Reproduction
 
@@ -57,6 +58,15 @@ curl --fail http://localhost:4173/health
 - Repeated voice submissions previously generated new random order IDs. Stable per-call idempotency now prevents duplicate order/event creation.
 - Running database suites twice exposed a non-repeatable phone-number migration. The migration is now repeatable and database suites run sequentially.
 - One early backend run returned an unexpected 501 in a realtime-auth test. The targeted rerun and subsequent full checks passed; no application route emits 501. This observation is retained rather than silently discarded.
+
+### Final review fixes
+An independent review found three issues, each reproduced with a failing regression test before correction:
+- A retry after a menu change could reject an already accepted order. The voice API now resolves its stable identity before current menu validation.
+- Simultaneous PostgreSQL submissions could collide on the idempotency key. The losing transaction now rolls back and returns the committed order.
+- A delayed conversation step could advance a replacement call. Each step now identifies its call as well as its cursor.
+- A session could accumulate unbounded history. Sessions now permit 30 scenarios between resets and 120 mutations per minute; resetting does not bypass the mutation limit.
+
+The unavailable-item outcome now offers an explicit workspace reset, and the browser test verifies that a pickup order succeeds afterward.
 
 ## Local order visibility measurement
 

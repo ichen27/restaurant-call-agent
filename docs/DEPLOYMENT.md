@@ -30,6 +30,8 @@ The image contains the compiled UI and backend, runs as the unprivileged node us
 
 Run one instance of the demo container and route HTTPS traffic to port 4173. Disable proxy buffering on /api/demo/events and allow long-lived event streams. Polling provides a fallback if an event stream drops.
 
+Capacity is capped at 200 active sessions, 30 scenarios between resets, 120 mutations per session per minute, and four event streams per session. Resetting clears sample history but retains the mutation limit.
+
 Preserve the demo/synthetic-data labels. Sessions expire after 30 minutes, disappear on restart, and are isolated by a random token. A reverse proxy may make visitors share one observed IP, so the 20-new-sessions-per-minute limit can apply to all visitors behind it. Configure trusted proxy handling deliberately if higher traffic requires it; never trust arbitrary forwarded headers.
 
 Health checks do not prove provider-backed telephony works. This container intentionally has no telephone integration routes and does not use a production database.
