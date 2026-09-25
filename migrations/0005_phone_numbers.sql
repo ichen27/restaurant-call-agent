@@ -1,4 +1,4 @@
-CREATE TABLE phone_numbers (
+CREATE TABLE IF NOT EXISTS phone_numbers (
   phone_number TEXT PRIMARY KEY,
   store_id     TEXT NOT NULL REFERENCES stores(id),
   label        TEXT,
