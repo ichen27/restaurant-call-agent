@@ -24,6 +24,7 @@ jobs:
         working-directory: apps/staff-web
       - run: npm run demo:build
       - run: npm run demo:test:e2e
+      - run: npm run staff:web:test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
