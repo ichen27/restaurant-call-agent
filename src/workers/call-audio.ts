@@ -44,7 +44,8 @@ function encodeMulawSample(sample: number): number {
 export function mulawToPcm16(mulawBuf: Buffer): Buffer {
   const pcm = Buffer.alloc(mulawBuf.length * 2);
   for (let i = 0; i < mulawBuf.length; i++) {
-    pcm.writeInt16LE(MULAW_DECODE_TABLE[mulawBuf[i]!], i * 2);
+    // A Buffer byte is 0..255; every entry exists in the 256-sample table.
+    pcm.writeInt16LE(MULAW_DECODE_TABLE[mulawBuf[i]!]!, i * 2);
   }
   return pcm;
 }

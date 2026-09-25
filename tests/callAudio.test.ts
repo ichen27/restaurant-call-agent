@@ -3,6 +3,19 @@ import { mulawToPcm16, pcm16ToMulaw, upsample, downsample } from '../src/workers
 
 describe('call-audio', () => {
   describe('mulawToPcm16', () => {
+    it('decodes the full byte range and preserves reference samples', () => {
+      const output = mulawToPcm16(Buffer.from(Array.from({ length: 256 }, (_, i) => i)));
+      expect(output.length).toBe(512);
+      expect(output.readInt16LE(0x00 * 2)).toBe(-32124);
+      expect(output.readInt16LE(0x80 * 2)).toBe(32124);
+      expect(output.readInt16LE(0x7f * 2)).toBe(0);
+      expect(output.readInt16LE(0xff * 2)).toBe(0);
+    });
+
+    it('accepts an empty audio frame', () => {
+      expect(mulawToPcm16(Buffer.alloc(0))).toEqual(Buffer.alloc(0));
+    });
+
     it('converts a single mulaw byte to a 16-bit PCM sample', () => {
       const input = Buffer.from([0xff]);
       const output = mulawToPcm16(input);

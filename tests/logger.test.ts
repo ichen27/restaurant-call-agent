@@ -11,7 +11,7 @@ vi.mock('pino', () => {
 });
 
 async function getMockLogger() {
-  const mod = await import('pino') as unknown as { __mockLogger: Record<string, ReturnType<typeof vi.fn>> };
+  const mod = await import('pino') as unknown as { __mockLogger: Record<'info' | 'warn' | 'error', ReturnType<typeof vi.fn>> };
   return mod.__mockLogger;
 }
 
